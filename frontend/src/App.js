@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
 // ─── Theme tokens ─────────────────────────────────────────────────────────────
 const themes = {
@@ -177,6 +177,14 @@ const HealthCheckerApp = () => {
   const [predictionError, setPredictionError] = useState('');
   const [loading, setLoading] = useState(false);
   const [prediction, setPrediction] = useState(null);
+  const REQUEST_TIMEOUT_MS = 12000;
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
@@ -251,11 +259,21 @@ const HealthCheckerApp = () => {
     if (!email || !password || (authMode === 'register' && !name)) return;
     setAuthError(''); setLoading(true);
     try {
-      const endpoint = authMode === 'register' ? '/auth/register' : '/auth/login';
+      const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
       const payload = authMode === 'register' ? { email, password, name } : { email, password };
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      let response;
+      try {
+        response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data?.detail || 'Authentication failed');
       if (data?.token) localStorage.setItem('auth_token', data.token);
@@ -263,7 +281,16 @@ const HealthCheckerApp = () => {
       setView('dashboard');
       if (authMode === 'register') { setShowNux(true); }
     } catch (error) {
-      setAuthError(error.message || 'Authentication failed. Please try again.');
+      if (error?.name === 'AbortError') {
+        setAuthError(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s. Please try again.`);
+        return;
+      }
+      const isNetworkError = error instanceof TypeError && error.message?.toLowerCase().includes('fetch');
+      setAuthError(
+        isNetworkError
+          ? `Cannot reach the server at ${API_BASE_URL}. Make sure the backend is running.`
+          : (error.message || 'Authentication failed. Please try again.')
+      );
     } finally { setLoading(false); }
   };
 
@@ -316,7 +343,7 @@ const HealthCheckerApp = () => {
   const inputStyle = {
     width: '100%', padding: '12px 16px', borderRadius: 12,
     border: `2px solid ${t.inputBorder}`, outline: 'none',
-    fontSize: 15, fontFamily: "'DM Sans', sans-serif",
+    fontSize: 15, fontFamily: "'DM Sans', sans-serif", letterSpacing: '0',
     boxSizing: 'border-box', background: t.inputBg,
     color: t.text, transition: 'border 0.15s', wordWrap: 'break-word'
   };
@@ -333,11 +360,11 @@ const HealthCheckerApp = () => {
 
   if (showNux) return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet" />
       <div style={{ background: t.surface, borderRadius: 24, padding: 40, maxWidth: 440, width: '100%', position: 'relative', boxShadow: '0 32px 80px rgba(0,0,0,0.35)', border: `1px solid ${t.border}`, overflowY: 'auto', maxHeight: '90vh' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ fontSize: 52, marginBottom: 16 }}>{nuxSteps[nuxStep].icon}</div>
-          <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800, color: t.text, marginBottom: 10, wordWrap: 'break-word', wordBreak: 'break-word' }}>{nuxSteps[nuxStep].title}</h2>
+          <h2 style={{ fontFamily: "'Poppins', sans-serif", fontSize: 22, fontWeight: 800, color: t.text, marginBottom: 10, wordWrap: 'break-word', wordBreak: 'break-word' }}>{nuxSteps[nuxStep].title}</h2>
           <p style={{ color: t.textSub, fontSize: 15, lineHeight: 1.6, fontFamily: "'DM Sans', sans-serif", wordWrap: 'break-word', wordBreak: 'break-word' }}>{nuxSteps[nuxStep].desc}</p>
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginBottom: 28 }}>
@@ -361,15 +388,15 @@ const HealthCheckerApp = () => {
 
   // ─── Shared header component ──────────────────────────────────────────────
   const AppHeader = ({ showUser = false }) => (
-    <header style={{ position: 'sticky', top: 0, zIndex: 50, background: t.header, backdropFilter: 'blur(14px)', borderBottom: `1px solid ${t.borderMid}`, padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <header style={{ position: 'sticky', top: 0, zIndex: 50, background: t.header, backdropFilter: 'blur(14px)', borderBottom: `1px solid ${t.borderMid}`, padding: isMobile ? '10px 12px' : '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
         <div style={{ width: 36, height: 36, borderRadius: 11, background: t.accentGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <span style={{ color: '#fff', fontSize: 16 }}>💜</span>
         </div>
-        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 17, color: t.text, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Smart Health</span>
+        <span style={{ fontFamily: isMobile ? "'DM Sans', sans-serif" : "'Poppins', sans-serif", fontWeight: 800, fontSize: isMobile ? 15 : 17, color: t.text, letterSpacing: isMobile ? 0 : '-0.3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Smart Health</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        {showUser && user && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 8, flexShrink: 0 }}>
+        {showUser && user && !isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, background: t.accentLight, minWidth: 0 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: t.accentText, fontFamily: "'DM Sans', sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</span>
           </div>
@@ -377,8 +404,8 @@ const HealthCheckerApp = () => {
         <ThemeToggle dark={dark} onToggle={() => setDark(d => !d)} t={t} />
         {showUser && (
           <>
-            <button onClick={() => setShowNux(true)} style={{ padding: '8px 12px', borderRadius: 10, background: t.accentLight, color: t.accentText, fontWeight: 600, border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>📖</button>
-            <button onClick={handleLogout} style={{ padding: '8px 14px', borderRadius: 10, background: t.surfaceAlt, color: t.text, fontWeight: 600, border: `1px solid ${t.border}`, cursor: 'pointer', fontSize: 13, fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>Logout</button>
+            {!isMobile && <button onClick={() => setShowNux(true)} style={{ padding: '8px 12px', borderRadius: 10, background: t.accentLight, color: t.accentText, fontWeight: 600, border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>📖</button>}
+            <button onClick={handleLogout} style={{ padding: isMobile ? '8px 10px' : '8px 14px', borderRadius: 10, background: t.surfaceAlt, color: t.text, fontWeight: 600, border: `1px solid ${t.border}`, cursor: 'pointer', fontSize: isMobile ? 12 : 13, fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>Logout</button>
           </>
         )}
         {!showUser && (
@@ -393,14 +420,14 @@ const HealthCheckerApp = () => {
   // ─── LANDING ──────────────────────────────────────────────────────────────
   if (view === 'landing') return (
     <div style={{ minHeight: '100vh', background: t.bgGradient, fontFamily: "'DM Sans', sans-serif", width: '100%', overflowX: 'hidden' }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet" />
       <AppHeader />
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px 40px', width: '100%', boxSizing: 'border-box' }}>
         <div style={{ textAlign: 'center', marginBottom: 64 }}>
           <div style={{ display: 'inline-block', padding: '6px 16px', borderRadius: 99, background: t.accentLight, color: t.accentText, fontWeight: 600, fontSize: 13, marginBottom: 24, border: `1px solid ${t.accentLightBorder}` }}>
             ✨ AI-Powered Health Insights
           </div>
-          <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: 'clamp(38px, 7vw, 68px)', fontWeight: 800, color: t.text, lineHeight: 1.08, letterSpacing: '-2px', marginBottom: 20, wordWrap: 'break-word', wordBreak: 'break-word' }}>
+          <h1 style={{ fontFamily: "'Poppins', sans-serif", fontSize: 'clamp(38px, 7vw, 68px)', fontWeight: 800, color: t.text, lineHeight: 1.08, letterSpacing: '-1px', marginBottom: 20, wordWrap: 'break-word', wordBreak: 'break-word' }}>
             Your Personal Health AI
           </h1>
           <p style={{ fontSize: 18, color: t.textSub, maxWidth: 600, margin: '0 auto 36px', lineHeight: 1.7, wordWrap: 'break-word', wordBreak: 'break-word' }}>
@@ -423,14 +450,14 @@ const HealthCheckerApp = () => {
               onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = t.cardShadowHover; }}
               onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = t.cardShadow; }}>
               <div style={{ width: 48, height: 48, borderRadius: 14, background: f.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, marginBottom: 16 }}>{f.icon}</div>
-              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: t.text, marginBottom: 8, wordWrap: 'break-word', wordBreak: 'break-word' }}>{f.title}</div>
+              <div style={{ fontFamily: "'Poppins', sans-serif", fontWeight: 700, fontSize: 16, color: t.text, marginBottom: 8, wordWrap: 'break-word', wordBreak: 'break-word' }}>{f.title}</div>
               <div style={{ fontSize: 14, color: t.textSub, lineHeight: 1.6, wordWrap: 'break-word', wordBreak: 'break-word' }}>{f.desc}</div>
             </div>
           ))}
         </div>
 
         <div style={{ borderRadius: 24, background: t.ctaBg, padding: '48px 40px', textAlign: 'center', color: '#fff', boxShadow: `0 24px 64px ${t.accent1}44` }}>
-          <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: 28, fontWeight: 800, marginBottom: 12, letterSpacing: '-0.5px', wordWrap: 'break-word', wordBreak: 'break-word' }}>Ready to check your symptoms?</h2>
+          <h2 style={{ fontFamily: "'Poppins', sans-serif", fontSize: 28, fontWeight: 800, marginBottom: 12, letterSpacing: '-0.5px', wordWrap: 'break-word', wordBreak: 'break-word' }}>Ready to check your symptoms?</h2>
           <p style={{ opacity: 0.85, marginBottom: 28, fontSize: 16, wordWrap: 'break-word', wordBreak: 'break-word' }}>Join thousands using AI for smarter health insights.</p>
           <button onClick={() => setView('auth')} style={{ padding: '14px 32px', borderRadius: 14, background: '#fff', color: t.accent1, fontWeight: 800, border: 'none', cursor: 'pointer', fontSize: 15, fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap' }}>
             Get Started Free →
@@ -443,7 +470,7 @@ const HealthCheckerApp = () => {
   // ─── AUTH ─────────────────────────────────────────────────────────────────
   if (view === 'auth') return (
     <div style={{ minHeight: '100vh', background: t.bgGradient, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'DM Sans', sans-serif", width: '100%', boxSizing: 'border-box', overflowX: 'hidden' }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet" />
 
       {/* Theme toggle floating */}
       <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 10 }}>
@@ -455,7 +482,7 @@ const HealthCheckerApp = () => {
           <div style={{ width: 56, height: 56, borderRadius: 18, background: t.accentGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
             <span style={{ fontSize: 26 }}>💜</span>
           </div>
-          <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: 24, fontWeight: 800, color: t.text, marginBottom: 6, letterSpacing: '-0.5px', wordWrap: 'break-word', wordBreak: 'break-word' }}>
+          <h2 style={{ fontFamily: "'Poppins', sans-serif", fontSize: 24, fontWeight: 800, color: t.text, marginBottom: 6, letterSpacing: '-0.5px', wordWrap: 'break-word', wordBreak: 'break-word' }}>
             {authMode === 'login' ? 'Welcome back 👋' : 'Create account 🚀'}
           </h2>
           <p style={{ color: t.textSub, fontSize: 14, wordWrap: 'break-word', wordBreak: 'break-word' }}>
@@ -466,20 +493,20 @@ const HealthCheckerApp = () => {
         <form onSubmit={e => { e.preventDefault(); handleAuth(); }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {authMode === 'register' && (
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Full Name</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.2 }}>Full Name</label>
               <input ref={nameRef} type="text" placeholder="John Doe" autoComplete="name" style={inputStyle}
                 onFocus={e => e.target.style.border = `2px solid ${t.accent1}`}
                 onBlur={e => e.target.style.border = `2px solid ${t.inputBorder}`} />
             </div>
           )}
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Email</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.2 }}>Email</label>
             <input ref={emailRef} type="email" placeholder="you@example.com" autoComplete="email" style={inputStyle}
               onFocus={e => e.target.style.border = `2px solid ${t.accent1}`}
               onBlur={e => e.target.style.border = `2px solid ${t.inputBorder}`} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Password</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.2 }}>Password</label>
             <input ref={passwordRef} type="password" placeholder="••••••••" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} style={inputStyle}
               onFocus={e => e.target.style.border = `2px solid ${t.accent1}`}
               onBlur={e => e.target.style.border = `2px solid ${t.inputBorder}`} />
@@ -510,24 +537,24 @@ const HealthCheckerApp = () => {
     const topPct = Math.round((top?.score || 0) * 100);
     return (
       <div style={{ minHeight: '100vh', background: t.bg, fontFamily: "'DM Sans', sans-serif", width: '100%', overflowX: 'hidden' }}>
-        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet" />
         <AppHeader showUser />
         <div style={{ maxWidth: 900, margin: '0 auto', padding: '32px 20px', width: '100%', boxSizing: 'border-box' }}>
           <div style={{ marginBottom: 28 }}>
-            <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: 28, fontWeight: 800, color: t.text, letterSpacing: '-0.5px', marginBottom: 6, wordWrap: 'break-word', wordBreak: 'break-word' }}>Analysis Results</h2>
+            <h2 style={{ fontFamily: "'Poppins', sans-serif", fontSize: 28, fontWeight: 800, color: t.text, letterSpacing: '-0.5px', marginBottom: 6, wordWrap: 'break-word', wordBreak: 'break-word' }}>Analysis Results</h2>
             <p style={{ color: t.textSub, fontSize: 15, wordWrap: 'break-word', wordBreak: 'break-word' }}>AI-ranked conditions based on your symptoms</p>
           </div>
 
           <div style={{ background: t.surface, borderRadius: 24, padding: 32, marginBottom: 20, boxShadow: t.cardShadow, display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', border: `1px solid ${t.border}` }}>
             <CircularProgress value={topPct} size={130} strokeWidth={10} color={t.progressColor} trackColor={t.trackColor}>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 28, fontWeight: 800, color: t.accentText }}>{topPct}%</div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: t.textMute, textTransform: 'uppercase', letterSpacing: 1 }}>Top Match</div>
+                <div style={{ fontFamily: "'Poppins', sans-serif", fontSize: 28, fontWeight: 800, color: t.accentText }}>{topPct}%</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: t.textMute, textTransform: 'uppercase', letterSpacing: 0.6 }}>Top Match</div>
               </div>
             </CircularProgress>
             <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: t.textMute, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Most Likely Condition</div>
-              <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 24, fontWeight: 800, color: t.text, marginBottom: 8, wordWrap: 'break-word', wordBreak: 'break-word' }}>{top?.icon} {top?.disease}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: t.textMute, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Most Likely Condition</div>
+              <div style={{ fontFamily: "'Poppins', sans-serif", fontSize: 24, fontWeight: 800, color: t.text, marginBottom: 8, wordWrap: 'break-word', wordBreak: 'break-word' }}>{top?.icon} {top?.disease}</div>
               <div style={{ display: 'inline-block', padding: '4px 12px', borderRadius: 99, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5,
                 background: prediction.confidence_level === 'high' ? t.accentLight : prediction.confidence_level === 'moderate' ? t.warnBg : t.infoBg,
                 color: prediction.confidence_level === 'high' ? t.accentText : prediction.confidence_level === 'moderate' ? t.warn : t.info }}>
@@ -548,12 +575,12 @@ const HealthCheckerApp = () => {
                       <span style={{ fontSize: 26, flexShrink: 0 }}>{pred.icon}</span>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontWeight: 700, fontSize: 16, color: t.text, wordWrap: 'break-word', wordBreak: 'break-word' }}>{pred.disease}</div>
-                        <div style={{ display: 'inline-block', marginTop: 3, padding: '2px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, background: sevBg, color: sevColor, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <div style={{ display: 'inline-block', marginTop: 3, padding: '2px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, background: sevBg, color: sevColor, textTransform: 'uppercase', letterSpacing: 0.2 }}>
                           {pred.severity}
                         </div>
                       </div>
                     </div>
-                    <span style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800, color: t.accentText, flexShrink: 0 }}>{pct}%</span>
+                    <span style={{ fontFamily: "'Poppins', sans-serif", fontSize: 22, fontWeight: 800, color: t.accentText, flexShrink: 0 }}>{pct}%</span>
                   </div>
                   <div style={{ height: 6, borderRadius: 3, background: t.trackColor, marginBottom: 10, overflow: 'hidden' }}>
                     <div style={{ height: '100%', borderRadius: 3, background: t.accentGrad, width: `${pct}%`, transition: 'width 0.8s ease' }} />
@@ -591,12 +618,12 @@ const HealthCheckerApp = () => {
   // ─── DASHBOARD ────────────────────────────────────────────────────────────
   return (
     <div style={{ minHeight: '100vh', background: t.bg, fontFamily: "'DM Sans', sans-serif", width: '100%', overflowX: 'hidden' }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet" />
       <AppHeader showUser />
 
       <div style={{ maxWidth: 1000, margin: '0 auto', padding: '32px 20px 80px', width: '100%', boxSizing: 'border-box' }}>
         <div style={{ marginBottom: 28 }}>
-          <h2 style={{ fontFamily: "'Syne', sans-serif", fontSize: 28, fontWeight: 800, color: t.text, letterSpacing: '-0.5px', marginBottom: 4, wordWrap: 'break-word', wordBreak: 'break-word' }}>Health Assessment</h2>
+          <h2 style={{ fontFamily: isMobile ? "'DM Sans', sans-serif" : "'Poppins', sans-serif", fontSize: isMobile ? 34 : 28, fontWeight: 800, color: t.text, letterSpacing: isMobile ? 0 : '-0.5px', lineHeight: 1.1, marginBottom: 4, wordWrap: 'break-word', wordBreak: 'break-word' }}>Health Assessment</h2>
           <p style={{ color: t.textSub, fontSize: 15, wordWrap: 'break-word', wordBreak: 'break-word' }}>Fill in your details to get AI-powered health insights</p>
         </div>
 
@@ -604,7 +631,7 @@ const HealthCheckerApp = () => {
         <div style={{ display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 200, background: t.surface, borderRadius: 22, padding: 24, boxShadow: t.cardShadow, display: 'flex', alignItems: 'center', gap: 20, border: `1px solid ${t.border}` }}>
             <CircularProgress value={Math.min((selectedSymptoms.length / 5) * 100, 100)} size={80} strokeWidth={8} color={t.progressColor} trackColor={t.trackColor}>
-              <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, color: t.accentText }}>{selectedSymptoms.length}</span>
+              <span style={{ fontFamily: "'Poppins', sans-serif", fontWeight: 800, fontSize: 18, color: t.accentText }}>{selectedSymptoms.length}</span>
             </CircularProgress>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: t.text, wordWrap: 'break-word', wordBreak: 'break-word' }}>Symptoms Selected</div>
@@ -612,8 +639,8 @@ const HealthCheckerApp = () => {
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 200, background: age && gender ? t.accentGrad : t.surface, borderRadius: 22, padding: 24, boxShadow: t.cardShadow, border: `1px solid ${t.border}` }}>
-            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: age && gender ? 'rgba(255,255,255,0.7)' : t.textSub, marginBottom: 6 }}>Profile Status</div>
-            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 20, color: age && gender ? '#fff' : t.text, wordWrap: 'break-word', wordBreak: 'break-word' }}>{age && gender ? '✓ Ready' : '⚠ Incomplete'}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: age && gender ? 'rgba(255,255,255,0.7)' : t.textSub, marginBottom: 6 }}>Profile Status</div>
+            <div style={{ fontFamily: "'Poppins', sans-serif", fontWeight: 800, fontSize: 20, color: age && gender ? '#fff' : t.text, wordWrap: 'break-word', wordBreak: 'break-word' }}>{age && gender ? '✓ Ready' : '⚠ Incomplete'}</div>
             <div style={{ fontSize: 13, color: age && gender ? 'rgba(255,255,255,0.8)' : t.textSub, marginTop: 4, wordWrap: 'break-word', wordBreak: 'break-word' }}>{age && gender ? `Age ${age} · ${gender}` : 'Enter age & gender below'}</div>
           </div>
         </div>
@@ -629,13 +656,13 @@ const HealthCheckerApp = () => {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Age</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.2 }}>Age</label>
               <input type="number" value={age} onChange={e => setAge(e.target.value)} min="1" max="120" placeholder="Your age" style={inputStyle}
                 onFocus={e => e.target.style.border = `2px solid ${t.accent1}`}
                 onBlur={e => e.target.style.border = `2px solid ${t.inputBorder}`} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Gender</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: t.textSub, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.2 }}>Gender</label>
               <select value={gender} onChange={e => setGender(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}
                 onFocus={e => e.target.style.border = `2px solid ${t.accent1}`}
                 onBlur={e => e.target.style.border = `2px solid ${t.inputBorder}`}>
@@ -664,7 +691,7 @@ const HealthCheckerApp = () => {
               { label: 'Known Allergies', items: commonAllergies, list: selectedAllergies, setList: setSelectedAllergies, activeColor: t.danger, activeBg: t.dangerBg },
             ].map((section, si) => (
               <div key={si}>
-                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: t.textMute, marginBottom: 10, wordWrap: 'break-word', wordBreak: 'break-word' }}>{section.label}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.2, color: t.textMute, marginBottom: 10, wordWrap: 'break-word', wordBreak: 'break-word' }}>{section.label}</div>
                 <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {section.items.map(item => {
                     const active = section.list.includes(item);
@@ -722,7 +749,7 @@ const HealthCheckerApp = () => {
                   {sel && <span style={{ position: 'absolute', top: 8, right: 8, fontSize: 12, color: t.accentText }}>✓</span>}
                   <div style={{ fontSize: 22, marginBottom: 6 }}>{s.icon}</div>
                   <div style={{ fontWeight: 600, fontSize: 12, color: sel ? t.accentText : t.text, lineHeight: 1.3, wordWrap: 'break-word', wordBreak: 'break-word' }}>{s.name}</div>
-                  <div style={{ fontSize: 10, color: t.textMute, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5, wordWrap: 'break-word', wordBreak: 'break-word' }}>{s.category}</div>
+                  <div style={{ fontSize: 10, color: t.textMute, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.2, wordWrap: 'break-word', wordBreak: 'break-word' }}>{s.category}</div>
                 </button>
               );
             })}
